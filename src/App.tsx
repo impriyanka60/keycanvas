@@ -1,26 +1,17 @@
 import React from 'react';
-import logo from './logo.svg';
-import './App.css';
-
-function App() {
+import Whiteboard from './Whiteboard';
+import ThemeToggle from './ThemeToggle';
+const App: React.FC = () => {
   return (
     <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+      <header className="container text-center mt-5">
+        <h1>Welcome to WhiteBoard !</h1>
+        <p style={{ fontSize: '1.2rem', color: '#555' }}>Collaborate in real-time!</p>
       </header>
+      <ThemeToggle />
+      <Whiteboard />
     </div>
   );
-}
+};
 
 export default App;
