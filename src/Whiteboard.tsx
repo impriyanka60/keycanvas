@@ -1,0 +1,302 @@
+import React, { useEffect, useRef, useState } from "react";
+import { Canvas, PencilBrush ,IText} from "fabric";
+import io from "socket.io-client";
+import { v4 as uuidv4 } from "uuid";
+import jsPDF from "jspdf" ;
+//import { socket } from "./socket";
+const COLORS = ["black", "red", "blue", "green", "orange", "purple"];
+const BRUSH_SIZES = [2, 5, 10, 15];
+
+export default function Whiteboard() {
+  const canvasRef = useRef<Canvas | null>(null);
+  const canvasWrapperRef = useRef<HTMLCanvasElement | null>(null);
+  function createSession() {
+  const newId = uuidv4();
+  setSessionId(newId);
+  connectToSocket(newId);
+}
+
+function joinSession() {
+  if (sessionId.trim()) {
+    connectToSocket(sessionId);
+  }
+}
+
+function connectToSocket(id: string) {
+  const socket = io("http://localhost:4000");
+  socketRef.current = socket;
+
+  socket.on("connect", () => {
+    console.log("Connected to socket");
+    setIsConnected(true);
+    socket.emit("join", id);
+  });
+
+  socket.on("canvas-update", (data: any) => {
+    if (canvasRef.current) {
+      canvasRef.current.loadFromJSON(data, () => {
+        canvasRef.current?.renderAll();
+      });
+    }
+  });
+}
+
+  const [sessionId, setSessionId] = useState<string>("");
+    const [isConnected, setIsConnected] = useState<boolean>(false);
+   const socketRef = useRef<any>(null);
+
+  // Brush settings
+  const [color, setColor] = useState<string>(COLORS[0]);
+  const [brushSize, setBrushSize] = useState<number>(BRUSH_SIZES[1]);
+
+  // Undo/redo stacks
+  const undoStack = useRef<string[]>([]);
+  const redoStack = useRef<string[]>([]);
+
+  // Initialize Fabric canvas
+  useEffect(() => {
+    if (!canvasWrapperRef.current) return;
+
+    const fabricCanvas = new Canvas(canvasWrapperRef.current, {
+      isDrawingMode: true,
+      backgroundColor: "white",
+    });
+
+    // Set initial brush settings
+    fabricCanvas.freeDrawingBrush = new PencilBrush(fabricCanvas);
+    fabricCanvas.freeDrawingBrush.color = color;
+    fabricCanvas.freeDrawingBrush.width = brushSize;
+
+    // Save canvas instance
+    canvasRef.current = fabricCanvas;
+
+    // Save initial empty state for undo
+    saveState();
+    if (socketRef.current) {
+  socketRef.current.emit("canvas-update", {
+    sessionId,
+    data: canvasRef.current.toJSON(),
+  });
+}
+
+    // Cleanup on unmount
+    return () => {
+      fabricCanvas.dispose();
+      canvasRef.current = null;
+    };
+    // eslint-disable-next-line
+  }, []);
+
+  // Update brush settings when color or size changes
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const brush = canvasRef.current.freeDrawingBrush as PencilBrush;
+    brush.color = color;
+    brush.width = brushSize;
+  }, [color, brushSize]);
+
+  // Save current canvas state to undo stack
+  function saveState() {
+    if (!canvasRef.current) return;
+    redoStack.current = []; // Clear redo on new action
+    const json = canvasRef.current.toJSON();
+    undoStack.current.push(JSON.stringify(json));
+  }
+
+  // Undo function
+  function undo() {
+    if (!canvasRef.current || undoStack.current.length <= 1) return; // Nothing to undo
+    const currentState = undoStack.current.pop();
+    if (currentState) {
+      redoStack.current.push(currentState);
+      const previousState = undoStack.current[undoStack.current.length - 1];
+      canvasRef.current.loadFromJSON(previousState, () => {
+        canvasRef.current?.renderAll();
+      });
+    }
+  }
+
+  // Redo function
+  function redo() {
+    if (!canvasRef.current || redoStack.current.length === 0) return;
+    const nextState = redoStack.current.pop();
+    if (nextState) {
+      undoStack.current.push(nextState);
+      canvasRef.current.loadFromJSON(nextState, () => {
+        canvasRef.current?.renderAll();
+      });
+    }
+  }
+  function clearCanvas() {
+    if (!canvasRef.current) return;
+    const confirmed = window.confirm(
+      "Are you sure you want to clear the canvas?"
+    );
+    if (confirmed) {
+      canvasRef.current.clear();
+      canvasRef.current.backgroundColor = "white";
+      canvasRef.current.renderAll();
+      saveState(); // Save blank state
+    }
+  }
+  function downloadImage() {
+  if (!canvasRef.current) return;
+  const dataURL = canvasRef.current.toDataURL({
+     multiplier: 1,
+    format: "png",
+    quality: 1,
+  });
+ 
+
+
+  const link = document.createElement("a");
+  link.href = dataURL;
+  link.download = "whiteboard.png";
+  link.click();
+}
+const handleDownloadPDF = () => {
+  const canvasElement = document.querySelector("canvas");
+  if (!canvasElement) return;
+
+  const imageData = canvasElement.toDataURL("image/png");
+
+  const pdf = new jsPDF({
+    orientation: "landscape",
+    unit: "px",
+    format: [canvasElement.width, canvasElement.height],
+  });
+
+  pdf.addImage(imageData, "PNG", 0, 0, canvasElement.width, canvasElement.height);
+  pdf.save("whiteboard.pdf");
+};
+
+ function addText() {
+  if (!canvasRef.current) return;
+  const text = new IText('Enter text here', {
+    left: 100,
+    top: 100,
+    fill: color,
+    fontSize: 20,
+  });
+  canvasRef.current.add(text);
+  canvasRef.current.setActiveObject(text);
+  saveState();
+}
+function toggleEraser() {
+  setColor((prev) => (prev === 'white' ? 'black' : 'white'));
+}
+
+  // Capture drawing events to save state
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const onPathCreated = () => {
+      saveState();
+    };
+
+    canvasRef.current.on("path:created", onPathCreated);
+
+    return () => {
+      canvasRef.current?.off("path:created", onPathCreated);
+    };
+  }, []);
+
+  return (
+    <div className="container mt-4">
+      {/* Controls */}
+      <div className="row mb-3 align-items-center">
+        <div className="col-auto">
+          <label className="form-label mb-0 me-2 btn btn-dark">Color:</label>
+          <select
+            className="form-select d-inline-block w-auto"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+          >
+            {COLORS.map((c) => (
+              <option key={c} value={c}>
+                {c.charAt(0).toUpperCase() + c.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="col-auto">
+          <label className="form-label mb-0 me-2">Brush size:</label>
+          <select
+            className="form-select d-inline-block w-auto btn btn-success"
+            value={brushSize}
+            onChange={(e) => setBrushSize(parseInt(e.target.value))}
+          >
+            {BRUSH_SIZES.map((s) => (
+              <option key={s} value={s}>
+                {s}px
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="col-auto">
+          <button className="btn btn-secondary me-2" onClick={undo}>
+            Undo
+          </button>
+          <button className="btn btn-secondary" onClick={redo}>
+            Redo
+          </button>
+          <button className="btn btn-danger ms-2" onClick={clearCanvas}>
+            Clear
+          </button>
+          <button className="btn btn-primary ms-2" onClick={downloadImage}>
+  Download PNG
+</button>
+<button className="btn btn-info ms-2" onClick={handleDownloadPDF}>
+  Download PDF
+</button>
+<button className="btn btn-warning ms-2" onClick={addText}>
+  Add Text
+</button>
+<button className="btn btn-outline-dark ms-2" onClick={toggleEraser}>
+  Toggle Eraser
+</button>
+
+
+        </div>
+      </div>
+      {!isConnected && (
+  <div className="card p-3 mb-4">
+    <h5 className="mb-3">Start or Join a Whiteboard Session</h5>
+    <div className="input-group mb-2">
+      <input
+        className="form-control"
+        placeholder="Enter session ID to join"
+        value={sessionId}
+        onChange={(e) => setSessionId(e.target.value)}
+      />
+      <button className="btn btn-success" onClick={joinSession}>
+        Join
+      </button>
+    </div>
+    <div className="text-center">
+      <button className="btn btn-primary" onClick={createSession}>
+        Create New Session
+      </button>
+    </div>
+  </div>
+)}
+
+      {/* Canvas wrapper */}
+      <div
+        className="border rounded"
+        style={{ background: "#fff", overflow: "hidden" }}
+      >
+        <canvas
+          ref={(el) => {
+            canvasWrapperRef.current = el;
+          }}
+          width={900}
+          height={500}
+          style={{ width: "100%", height: 500, display: "block" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+
