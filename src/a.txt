@@ -1,0 +1,157 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Canvas, PencilBrush } from 'fabric';
+
+const COLORS = ['black', 'red', 'blue', 'green', 'orange', 'purple'];
+const BRUSH_SIZES = [2, 5, 10, 15];
+
+export default function Whiteboard() {
+  const canvasRef = useRef<Canvas | null>(null);
+  const canvasWrapperRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Brush settings
+  const [color, setColor] = useState<string>(COLORS[0]);
+  const [brushSize, setBrushSize] = useState<number>(BRUSH_SIZES[1]);
+
+  // Undo/redo stacks
+  const undoStack = useRef<string[]>([]);
+  const redoStack = useRef<string[]>([]);
+
+  // Initialize Fabric canvas
+  useEffect(() => {
+    if (!canvasWrapperRef.current) return;
+
+    const fabricCanvas = new Canvas(canvasWrapperRef.current, {
+      isDrawingMode: true,
+      backgroundColor: 'white',
+    });
+
+    // Set initial brush settings
+    fabricCanvas.freeDrawingBrush = new PencilBrush(fabricCanvas);
+    fabricCanvas.freeDrawingBrush.color = color;
+    fabricCanvas.freeDrawingBrush.width = brushSize;
+
+    // Save canvas instance
+    canvasRef.current = fabricCanvas;
+
+    // Save initial empty state for undo
+    saveState();
+
+    // Cleanup on unmount
+    return () => {
+      fabricCanvas.dispose();
+      canvasRef.current = null;
+    };
+    // eslint-disable-next-line
+  }, []);
+
+  // Update brush settings when color or size changes
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const brush = canvasRef.current.freeDrawingBrush as PencilBrush;
+    brush.color = color;
+    brush.width = brushSize;
+  }, [color, brushSize]);
+
+  // Save current canvas state to undo stack
+  function saveState() {
+    if (!canvasRef.current) return;
+    redoStack.current = []; // Clear redo on new action
+    const json = canvasRef.current.toJSON();
+    undoStack.current.push(JSON.stringify(json));
+  }
+
+  // Undo function
+  function undo() {
+    if (!canvasRef.current || undoStack.current.length <= 1) return; // Nothing to undo
+    const currentState = undoStack.current.pop();
+    if (currentState) {
+      redoStack.current.push(currentState);
+      const previousState = undoStack.current[undoStack.current.length - 1];
+      canvasRef.current.loadFromJSON(previousState, () => {
+        canvasRef.current?.renderAll();
+      });
+    }
+  }
+
+  // Redo function
+  function redo() {
+    if (!canvasRef.current || redoStack.current.length === 0) return;
+    const nextState = redoStack.current.pop();
+    if (nextState) {
+      undoStack.current.push(nextState);
+      canvasRef.current.loadFromJSON(nextState, () => {
+        canvasRef.current?.renderAll();
+      });
+    }
+  }
+
+  // Capture drawing events to save state
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const onPathCreated = () => {
+      saveState();
+    };
+
+    canvasRef.current.on('path:created', onPathCreated);
+
+    return () => {
+      canvasRef.current?.off('path:created', onPathCreated);
+    };
+  }, []);
+
+  return (
+    <div className="container mt-4">
+      {/* Controls */}
+      <div className="row mb-3 align-items-center">
+        <div className="col-auto">
+          <label className="form-label mb-0 me-2">Color:</label>
+          <select
+            className="form-select d-inline-block w-auto"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+          >
+            {COLORS.map((c) => (
+              <option key={c} value={c}>
+                {c.charAt(0).toUpperCase() + c.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="col-auto">
+          <label className="form-label mb-0 me-2">Brush size:</label>
+          <select
+            className="form-select d-inline-block w-auto"
+            value={brushSize}
+            onChange={(e) => setBrushSize(parseInt(e.target.value))}
+          >
+            {BRUSH_SIZES.map((s) => (
+              <option key={s} value={s}>
+                {s}px
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="col-auto">
+          <button className="btn btn-secondary me-2" onClick={undo}>
+            Undo
+          </button>
+          <button className="btn btn-secondary" onClick={redo}>
+            Redo
+          </button>
+        </div>
+      </div>
+      {/* Canvas wrapper */}
+      <div className="border rounded" style={{ background: '#fff', overflow: 'hidden' }}>
+        <canvas
+          ref={(el) => {
+            canvasWrapperRef.current = el;
+          }}
+          width={900}
+          height={500}
+          style={{ width: '100%', height: 500, display: 'block' }}
+        />
+      </div>
+    </div>
+  );
+}
